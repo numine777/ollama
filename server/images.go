@@ -23,7 +23,7 @@ import (
 
 	"github.com/ollama/ollama/api"
 	"github.com/ollama/ollama/envconfig"
-	"github.com/ollama/ollama/llm"
+	"github.com/ollama/ollama/fs/ggml"
 	"github.com/ollama/ollama/parser"
 	"github.com/ollama/ollama/template"
 	"github.com/ollama/ollama/types/model"
@@ -35,6 +35,7 @@ var (
 	errCapabilityCompletion = errors.New("completion")
 	errCapabilityTools      = errors.New("tools")
 	errCapabilityInsert     = errors.New("insert")
+	errInsecureProtocol     = errors.New("insecure protocol http")
 )
 
 type Capability string
@@ -78,21 +79,21 @@ func (m *Model) CheckCapabilities(caps ...Capability) error {
 	for _, cap := range caps {
 		switch cap {
 		case CapabilityCompletion:
-			f, err := os.Open(m.ModelPath)
+			r, err := os.Open(m.ModelPath)
 			if err != nil {
 				slog.Error("couldn't open model file", "error", err)
 				continue
 			}
-			defer f.Close()
+			defer r.Close()
 
 			// TODO(mxyng): decode the GGML into model to avoid doing this multiple times
-			ggml, _, err := llm.DecodeGGML(f, 0)
+			f, _, err := ggml.Decode(r, 0)
 			if err != nil {
 				slog.Error("couldn't decode ggml", "error", err)
 				continue
 			}
 
-			if _, ok := ggml.KV()[fmt.Sprintf("%s.pooling_type", ggml.KV().Architecture())]; ok {
+			if _, ok := f.KV()[fmt.Sprintf("%s.pooling_type", f.KV().Architecture())]; ok {
 				errs = append(errs, errCapabilityCompletion)
 			}
 		case CapabilityTools:
@@ -479,7 +480,7 @@ func PushModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 	fn(api.ProgressResponse{Status: "retrieving manifest"})
 
 	if mp.ProtocolScheme == "http" && !regOpts.Insecure {
-		return errors.New("insecure protocol http")
+		return errInsecureProtocol
 	}
 
 	manifest, _, err := GetManifest(mp)
@@ -543,7 +544,7 @@ func PullModel(ctx context.Context, name string, regOpts *registryOptions, fn fu
 	}
 
 	if mp.ProtocolScheme == "http" && !regOpts.Insecure {
-		return errors.New("insecure protocol http")
+		return errInsecureProtocol
 	}
 
 	fn(api.ProgressResponse{Status: "pulling manifest"})
